@@ -1,0 +1,21 @@
+{
+  "name": "みみトーン ─ 左右べつべつの音で試す60秒",
+  "short_name": "みみトーン",
+  "description": "耳鳴りと同じ高さの音を、同じ側の耳から60秒。止めた直後の変化と、戻るまでの秒数を残す道具です。",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0c1c22",
+  "lang": "ja",
+  "dir": "ltr",
+  "categories": ["health", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

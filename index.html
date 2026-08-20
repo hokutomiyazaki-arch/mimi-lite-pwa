@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<!--
+  ========================================================================
+  みみトーン ─ カラダマニア Lite PWA（mimi-lite-pwa）
+  ベース：pwa-factory/template/index.html（CONFIG＋共通ブート＋WORK差し込みの3層構造）
+  FNT標準に寄せた点：manifest.json / Network First SW / 白背景スプラッシュ /
+  M PLUS Rounded 1c Bold / サイドメニュー方式 / safe-area / touch-action:auto !important /
+  Date.now基準タイマー / window.appMode / AudioContext try-catch
+  最小1機能：左右独立トーンジェネレーター＋ピッチマッチング＋「止めた直後」判定
+  ========================================================================
+-->
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0c1c22" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="みみトーン" />
+<meta name="description" content="耳鳴りと同じ高さの音を、同じ側の耳から60秒。止めた直後の変化と、戻るまでの秒数を残す道具です。" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<!-- フォントは非ブロッキングで読む（電波が悪い/CDNに繋がらない時に起動が止まらないように。落ちても丸ゴシックの端末フォントで動く） -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700&display=swap" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700&display=swap" /></noscript>
+<title>みみトーン ─ カラダマニア Lite</title>
+<style>
+  :root{
+    --bg0:#0b1a20; --bg1:#123138;
+    --ink:#eef6f4; --muted:#a8c3bd; --line:rgba(255,255,255,.12);
+    --accent:#93e3cf; --accent2:#3fa895;
+    --left:#63b3ff;      /* 左＝青（UD配色：青×橙は色覚特性があっても見分けやすい） */
+    --right:#ffb04d;     /* 右＝橙 */
+    --warn:#ffd98a;
+    --panel:rgba(255,255,255,.05);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%; overflow-x:hidden; width:100%;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    font-family:"M PLUS Rounded 1c","Hiragino Maru Gothic ProN","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+    font-weight:700; color:var(--ink); line-height:1.7;
+    background:radial-gradient(120% 90% at 50% 8%, #16414a 0%, var(--bg1) 42%, var(--bg0) 100%);
+    background-attachment:fixed;
+    min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; align-items:center;
+    padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-left)) calc(18px + env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-right));
+    -webkit-tap-highlight-color:transparent; overflow-x:hidden;
+    touch-action:auto !important;
+  }
+  body *{touch-action:auto !important;}   /* iOS：スクロールが死ぬ事故の対策 */
+  .wrap{width:100%; max-width:460px; display:flex; flex-direction:column; flex:1;}
+
+  /* ===== ヘッダー（透過ロゴ＋サイドメニューボタン） ===== */
+  header{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px;}
+  .brand{display:flex; align-items:center; gap:7px; font-size:11.5px; letter-spacing:.22em; color:var(--muted);}
+  .brand img{width:26px; height:26px; object-fit:contain;}
+  .menubtn{background:rgba(255,255,255,.06); border:1px solid var(--line); color:var(--ink);
+    font:inherit; font-size:12px; padding:9px 13px; border-radius:999px; cursor:pointer; min-height:40px;}
+  h1{font-size:25px; letter-spacing:.02em; margin:6px 0 2px;}
+  .sub{font-size:12.5px; color:var(--muted); line-height:1.75; margin-bottom:12px;}
+
+  /* ===== 正直枠（トップに常設・削らない） ===== */
+  .honest{border:1px solid rgba(255,217,138,.35); background:rgba(255,217,138,.07);
+    border-radius:14px; padding:12px 14px; font-size:12px; line-height:1.85; color:var(--warn);
+    white-space:pre-line; margin-bottom:14px;}
+
+  /* ===== 警告バナー ===== */
+  .banner{border:1px solid rgba(255,120,120,.4); background:rgba(255,120,120,.1); color:#ffd7d7;
+    border-radius:12px; padding:11px 13px; font-size:12px; line-height:1.8; margin-bottom:12px;}
+  .banner[hidden]{display:none;}
+
+  /* ===== WORK領域 ===== */
+  #work{flex:1; display:flex; flex-direction:column; min-height:280px;}
+  .screen{display:none; flex-direction:column; flex:1;}
+  .screen.on{display:flex;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:12px;}
+  .card h2{font-size:13px; letter-spacing:.12em; color:var(--muted); margin-bottom:10px;}
+  .seg{display:flex; gap:6px; background:rgba(255,255,255,.05); padding:5px; border-radius:14px;}
+  .seg button{flex:1; padding:13px 0; border:none; border-radius:10px; background:none; color:var(--muted);
+    font:inherit; font-size:14.5px; cursor:pointer; min-height:48px;}
+  .seg button[aria-pressed="true"]{background:rgba(147,227,207,.18); color:var(--ink); box-shadow:inset 0 0 0 1px rgba(147,227,207,.45);}
+  .seg button[aria-pressed="true"][data-side="L"]{background:rgba(99,179,255,.2); box-shadow:inset 0 0 0 1px rgba(99,179,255,.6);}
+  .seg button[aria-pressed="true"][data-side="R"]{background:rgba(255,176,77,.2); box-shadow:inset 0 0 0 1px rgba(255,176,77,.6);}
+
+  /* 左右パネル */
+  .ear{border-radius:16px; padding:13px 14px; margin-bottom:11px; border:1px solid var(--line); background:var(--panel);}
+  .ear[hidden]{display:none;}
+  .ear.L{border-left:5px solid var(--left);}
+  .ear.R{border-left:5px solid var(--right);}
+  .ear .title{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;}
+  .ear .title .name{font-size:15px;}
+  .ear.L .title .name{color:var(--left);}
+  .ear.R .title .name{color:var(--right);}
+  .ear .val{font-size:22px; font-variant-numeric:tabular-nums; letter-spacing:.02em;}
+  .ear .val small{font-size:12px; color:var(--muted); margin-left:3px;}
+  .row{display:flex; align-items:center; gap:9px; margin:8px 0 2px;}
+  .lbl{font-size:11.5px; color:var(--muted); letter-spacing:.08em;}
+  input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:34px; background:none; margin:0;}
+  input[type=range]::-webkit-slider-runnable-track{height:8px; border-radius:99px; background:rgba(255,255,255,.16);}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:32px; height:32px; border-radius:50%;
+    background:var(--ink); border:3px solid var(--accent2); margin-top:-12px; cursor:pointer;}
+  input[type=range]::-moz-range-track{height:8px; border-radius:99px; background:rgba(255,255,255,.16);}
+  input[type=range]::-moz-range-thumb{width:32px; height:32px; border-radius:50%; background:var(--ink); border:3px solid var(--accent2);}
+  .ear.L input[type=range]::-webkit-slider-thumb{border-color:var(--left);}
+  .ear.R input[type=range]::-webkit-slider-thumb{border-color:var(--right);}
+  .step{background:rgba(255,255,255,.07); border:1px solid var(--line); color:var(--ink); font:inherit;
+    font-size:18px; width:46px; height:46px; border-radius:12px; cursor:pointer; flex:none;}
+  .mini{background:rgba(255,255,255,.06); border:1px solid var(--line); color:var(--ink); font:inherit;
+    font-size:13px; padding:11px 14px; border-radius:12px; cursor:pointer; min-height:46px;}
+  .mini[aria-pressed="true"]{background:rgba(147,227,207,.2); border-color:rgba(147,227,207,.6);}
+  .cap{font-size:11px; color:var(--muted); line-height:1.7; margin-top:6px;}
+  .capmax{color:var(--warn);}
+
+  /* CTA */
+  .cta{margin-top:6px; width:100%; padding:17px; border-radius:16px; border:none; font:inherit;
+    font-size:17px; letter-spacing:.06em; cursor:pointer; color:#06231d; min-height:58px;
+    background:linear-gradient(180deg,var(--accent),var(--accent2));}
+  .cta:active{transform:translateY(1px);}
+  .cta:disabled{opacity:.4; cursor:default;}
+  .ghost{margin-top:9px; width:100%; padding:14px; border-radius:14px; font:inherit; font-size:14px;
+    background:none; border:1px solid var(--line); color:var(--muted); cursor:pointer; min-height:50px;}
+
+  /* セッション */
+  .bigwrap{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:14px 0;}
+  .big{font-size:74px; line-height:1.1; font-variant-numeric:tabular-nums; letter-spacing:.02em;}
+  .big small{font-size:20px; color:var(--muted); margin-left:4px;}
+  .phase{font-size:15px; color:var(--accent); letter-spacing:.1em; margin-bottom:6px; min-height:24px;}
+  .note{font-size:12.5px; color:var(--muted); line-height:1.8; margin-top:12px; max-width:330px;}
+  .ringwrap{position:relative; width:190px; height:190px; display:grid; place-items:center; margin:6px 0;}
+  .ringwrap svg{position:absolute; inset:0; transform:rotate(-90deg);}
+  .ringwrap .bg{fill:none; stroke:rgba(255,255,255,.1); stroke-width:8;}
+  .ringwrap .fg{fill:none; stroke:var(--accent); stroke-width:8; stroke-linecap:round; transition:stroke-dashoffset .25s linear;}
+  .playing{display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:10px;}
+  .chip{font-size:12px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink);}
+  .chip.L{border-color:rgba(99,179,255,.6); color:var(--left);}
+  .chip.R{border-color:rgba(255,176,77,.6); color:var(--right);}
+  .btnrow{display:flex; gap:9px; width:100%;}
+  .btnrow > *{flex:1;}
+
+  /* 0〜10 */
+  .scale{display:grid; grid-template-columns:repeat(6,1fr); gap:7px; margin-top:6px;}
+  .scale button{padding:14px 0; border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.05);
+    color:var(--ink); font:inherit; font-size:16px; cursor:pointer; min-height:50px;}
+  .scale button[aria-pressed="true"]{background:rgba(147,227,207,.25); border-color:var(--accent);}
+  .scaleends{display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:7px;}
+
+  /* 記録 */
+  .log{margin-top:4px;}
+  .log h2{font-size:13px; letter-spacing:.12em; color:var(--muted); margin-bottom:9px;}
+  .logitem{border:1px solid var(--line); border-radius:13px; padding:10px 12px; margin-bottom:8px; font-size:12.5px; line-height:1.75;}
+  .logitem .top{display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:11px;}
+  .logitem .ears{margin-top:3px;}
+  .logitem .ears b{font-weight:700;}
+  .logitem .ears .l{color:var(--left);}
+  .logitem .ears .r{color:var(--right);}
+  .logitem .res{margin-top:3px; color:var(--accent);}
+  .empty{font-size:12px; color:var(--muted); line-height:1.8;}
+  .best{font-size:12.5px; color:var(--warn); line-height:1.8; margin-bottom:9px;}
+
+  /* ===== フッター ===== */
+  footer{margin-top:20px; padding-top:16px; border-top:1px solid var(--line); text-align:center;}
+  .med{font-size:11px; color:var(--muted); line-height:1.85; white-space:pre-line; text-align:left;}
+  .up{display:inline-block; margin-top:14px; font-size:12.5px; color:var(--accent); text-decoration:none;
+    border:1px solid rgba(147,227,207,.35); border-radius:12px; padding:11px 16px; min-height:44px;}
+  .copy{margin-top:16px; font-size:10.5px; letter-spacing:.14em; color:var(--muted); opacity:.75;}
+
+  /* ===== サイドメニュー（モーダルではなくドロワー） ===== */
+  #scrim{position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; transition:opacity .25s ease; z-index:70;}
+  #scrim.on{opacity:1; pointer-events:auto;}
+  #menu{position:fixed; top:0; right:0; height:100%; width:min(88%,380px); z-index:80;
+    background:linear-gradient(180deg,#123138,#0b1a20); border-left:1px solid var(--line);
+    transform:translateX(102%); transition:transform .28s ease; display:flex; flex-direction:column;
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
+    overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:auto !important;}
+  #menu *{touch-action:auto !important;}
+  #menu.on{transform:translateX(0);}
+  #menu .mhead{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  #menu .mhead .t{font-size:13px; letter-spacing:.16em; color:var(--muted);}
+  #menu .close{background:none; border:1px solid var(--line); color:var(--ink); font:inherit; font-size:14px;
+    padding:9px 14px; border-radius:999px; cursor:pointer; min-height:42px;}
+  #menu h3{font-size:15px; margin:12px 0 8px; color:var(--accent);}
+  #menu .neuro{font-size:12.5px; line-height:1.95; color:var(--ink); white-space:pre-line; opacity:.95;}
+  #menu .mitem{display:flex; align-items:center; justify-content:space-between; gap:10px;
+    border-top:1px solid var(--line); padding:14px 0; font-size:13.5px;}
+  #menu .mitem .d{font-size:11px; color:var(--muted); line-height:1.7;}
+  #menu a.mlink{color:var(--ink); text-decoration:none; font-size:13.5px;}
+  .toggle{position:relative; width:56px; height:32px; border-radius:99px; border:1px solid var(--line);
+    background:rgba(255,255,255,.08); cursor:pointer; flex:none;}
+  .toggle::after{content:""; position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%;
+    background:var(--muted); transition:.2s;}
+  .toggle[aria-pressed="true"]{background:rgba(147,227,207,.3); border-color:var(--accent);}
+  .toggle[aria-pressed="true"]::after{left:27px; background:var(--accent);}
+
+  /* ===== 起動ゲート（医療フラグ／イヤホン） ===== */
+  .gate{position:fixed; inset:0; z-index:90; background:linear-gradient(180deg,#0f2b32,#0b1a20);
+    display:none; flex-direction:column; overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:auto !important;
+    padding:max(22px,env(safe-area-inset-top)) 20px calc(26px + env(safe-area-inset-bottom));}
+  .gate *{touch-action:auto !important;}
+  .gate.on{display:flex;}
+  .gate .inner{width:100%; max-width:460px; margin:auto;}
+  .gate h2{font-size:19px; margin-bottom:12px; color:var(--accent);}
+  .gate .txt{font-size:13px; line-height:2; white-space:pre-line; color:var(--ink);}
+  .gate .sub2{font-size:12.5px; color:var(--muted); line-height:1.9; margin-top:14px;}
+
+  /* ===== スプラッシュ（FNT標準：白背景） ===== */
+  #splash{position:fixed; inset:0; z-index:100; background:#ffffff; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:10px; transition:opacity .5s ease; padding:24px;}
+  #splash.hide{opacity:0; pointer-events:none;}
+  #splash .sp-logo{width:150px; height:150px; object-fit:contain;}
+  #splash .sp-fnt{font-size:13px; letter-spacing:.18em; color:#1d3f47; text-align:center;}
+  #splash .sp-app{font-size:22px; color:#0b1a20; margin-top:2px;}
+  #splash .sp-tag{font-size:12px; letter-spacing:.1em; color:#4d6f72; text-align:center;}
+  #splash .sp-copy{position:absolute; bottom:calc(26px + env(safe-area-inset-bottom)); font-size:10.5px; letter-spacing:.12em; color:#7d9599;}
+
+  /* ===== インストール案内 ===== */
+  .install{position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); max-width:436px; margin:0 auto;
+    display:flex; gap:10px; align-items:center; background:rgba(18,49,56,.97); border:1px solid var(--line); border-radius:14px;
+    padding:12px 14px; box-shadow:0 12px 30px rgba(0,0,0,.45); font-size:12.5px; line-height:1.7; z-index:60;}
+  .install[hidden]{display:none;}
+  body.hasinstall{padding-bottom:calc(96px + env(safe-area-inset-bottom));}
+  .install .msg{flex:1;} .install .msg b{color:var(--accent);}
+  .install .x{background:none; border:none; color:var(--muted); font:inherit; font-size:22px; line-height:1; cursor:pointer; padding:0 4px; min-height:40px;}
+  :focus-visible{outline:3px solid var(--accent); outline-offset:2px;}
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important;} }
+  @media (max-width:340px){ .big{font-size:60px;} h1{font-size:22px;} }
+</style>
+</head>
+<body>
+
+<!-- ===== スプラッシュ（白背景ロゴ＋Functional Neuro Training＋アプリ名＋タグライン＋著作権） ===== -->
+<div id="splash" aria-hidden="true">
+  <img src="icons/FNT512.png" alt="" class="sp-logo" />
+  <div class="sp-fnt">Functional Neuro Training</div>
+  <div class="sp-app">みみトーン</div>
+  <div class="sp-tag">〜 神経科学で、変わるカラダ。 〜</div>
+  <div class="sp-copy">&copy; Functional Neuro Training</div>
+</div>
+
+<!-- ===== 起動ゲート①：医療フラグ（起動時に1度） ===== -->
+<div class="gate" id="gateMed" role="dialog" aria-labelledby="gateMedT">
+  <div class="inner">
+    <h2 id="gateMedT">はじめに、ひとつだけ確認させてください</h2>
+    <p class="txt" id="gateMedTxt"></p>
+    <p class="sub2">当てはまるものがあっても、このアプリを開いてはいけないという意味ではありません。<br />ただ、耳の中で起きていることを先に調べておいたほうがいい、というだけです。</p>
+    <button class="cta" id="gateMedOk" style="margin-top:20px;">確認しました</button>
+  </div>
+</div>
+
+<!-- ===== 起動ゲート②：イヤホン＋端末音量（端末音量はアプリから制御できないため） ===== -->
+<div class="gate" id="gateAudio" role="dialog" aria-labelledby="gateAudT">
+  <div class="inner">
+    <h2 id="gateAudT">イヤホンを用意してください</h2>
+    <p class="txt">左右べつべつの高さの音を出すアプリなので、<br />スピーカーだと意味がありません。かならずイヤホン（またはヘッドホン）で。
+
+そして、<b>端末そのものの音量も小さくしてください。</b>
+アプリ側の音量には上限をかけてありますが、端末の音量まではこちらから下げられません。
+
+目安は「耳鳴りがぎりぎり聞こえるくらい」。
+大きくすればいいというものではありません。</p>
+    <p class="sub2">はじめての人は、いちばん小さいところから少しずつ上げていくのが安全です。<br />
+※iPhone / iPadで「モノラルオーディオ」がオンだと左右が混ざってしまいます。<br />設定 &gt; アクセシビリティ &gt; オーディオとビジュアル で、オフになっているか確認してください。</p>
+    <button class="cta" id="gateAudOk" style="margin-top:20px;">イヤホンをつけました</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <header>
+    <span class="brand"><img src="icons/FNT512-transparent.png" alt="Functional Neuro Training" />カラダマニア</span>
+    <button class="menubtn" id="menuBtn" aria-expanded="false" aria-controls="menu">☰ メニュー</button>
+  </header>
+
+  <h1 id="appName">みみトーン</h1>
+  <p class="sub" id="appSub"></p>
+
+  <!-- 音が出せない端末／ロックダウンモードの警告 -->
+  <div class="banner" id="lockBanner" hidden></div>
+
+  <!-- 正直枠（トップに常設） -->
+  <p class="honest" id="honestBox"></p>
+
+  <!-- ============ 【WORK差し込み①】最小1機能UI ============ -->
+  <main id="work">
+
+    <!-- ── 画面1：設定（耳・周波数・音の種類・音量） ── -->
+    <section class="screen on" id="scSetup">
+      <div class="card">
+        <h2>1. 耳鳴りが聞こえている側</h2>
+        <div class="seg" id="earSeg" role="group" aria-label="耳を選ぶ">
+          <button type="button" data-ear="R" data-side="R" aria-pressed="false">右</button>
+          <button type="button" data-ear="L" data-side="L" aria-pressed="false">左</button>
+          <button type="button" data-ear="B" aria-pressed="true">両方</button>
+        </div>
+        <p class="cap">両方の人は、左右それぞれ別の高さ・別の音量に合わせられます。</p>
+      </div>
+
+      <div class="card">
+        <h2>2. 音の種類</h2>
+        <div class="seg" id="typeSeg" role="group" aria-label="音の種類">
+          <button type="button" data-type="tone" aria-pressed="true">純音</button>
+          <button type="button" data-type="noise" aria-pressed="false">狭帯域ノイズ</button>
+        </div>
+        <p class="cap">「ピー」という一本の音が純音、「サー」に近いのが狭帯域ノイズ。近いほうを選んでください。</p>
+      </div>
+
+      <!-- 右耳パネル（左右で別々の周波数・音量を同時に出せることが本体） -->
+      <div class="ear R" id="panR">
+        <div class="title"><span class="name">右耳</span><span class="val" id="fRv">—<small>Hz</small></span></div>
+        <div class="lbl">3. 高さ（あなたの耳鳴りと同じところで止める）</div>
+        <div class="row">
+          <button class="step" type="button" data-fine="R" data-dir="-1" aria-label="右耳の高さを下げる">−</button>
+          <input type="range" id="fR" min="0" max="1000" value="620" step="1" aria-label="右耳の周波数" />
+          <button class="step" type="button" data-fine="R" data-dir="1" aria-label="右耳の高さを上げる">＋</button>
+        </div>
+        <div class="lbl" style="margin-top:8px;">4. 音量（耳鳴りがぎりぎり聞こえるくらい）</div>
+        <div class="row">
+          <input type="range" id="vR" min="0" max="100" value="25" step="1" aria-label="右耳の音量" />
+          <span class="val" id="vRv" style="font-size:16px; min-width:52px; text-align:right;">25</span>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button class="mini" type="button" id="tryR" aria-pressed="false" style="flex:1;">▶ 右耳で試聴</button>
+        </div>
+        <p class="cap capmax" id="capR"></p>
+      </div>
+
+      <!-- 左耳パネル -->
+      <div class="ear L" id="panL">
+        <div class="title"><span class="name">左耳</span><span class="val" id="fLv">—<small>Hz</small></span></div>
+        <div class="lbl">3. 高さ（あなたの耳鳴りと同じところで止める）</div>
+        <div class="row">
+          <button class="step" type="button" data-fine="L" data-dir="-1" aria-label="左耳の高さを下げる">−</button>
+          <input type="range" id="fL" min="0" max="1000" value="620" step="1" aria-label="左耳の周波数" />
+          <button class="step" type="button" data-fine="L" data-dir="1" aria-label="左耳の高さを上げる">＋</button>
+        </div>
+        <div class="lbl" style="margin-top:8px;">4. 音量（耳鳴りがぎりぎり聞こえるくらい）</div>
+        <div class="row">
+          <input type="range" id="vL" min="0" max="100" value="25" step="1" aria-label="左耳の音量" />
+          <span class="val" id="vLv" style="font-size:16px; min-width:52px; text-align:right;">25</span>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button class="mini" type="button" id="tryL" aria-pressed="false" style="flex:1;">▶ 左耳で試聴</button>
+        </div>
+        <p class="cap capmax" id="capL"></p>
+      </div>
+
+      <button class="cta" id="startBtn">60秒 鳴らす</button>
+      <p class="cap" style="text-align:center; margin-top:10px;">鳴っているあいだは、何もしなくて大丈夫です。<br />判定は、止まってからです。</p>
+    </section>
+
+    <!-- ── 画面2：60秒（判定UIは出さない・押せない） ── -->
+    <section class="screen" id="scPlay">
+      <div class="bigwrap">
+        <div class="phase" id="playPhase">ただ、聞いていてください</div>
+        <div class="ringwrap">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="bg" cx="100" cy="100" r="88"></circle>
+            <circle class="fg" id="ring" cx="100" cy="100" r="88" stroke-dasharray="553" stroke-dashoffset="0"></circle>
+          </svg>
+          <div class="big" id="playCount">60<small>秒</small></div>
+        </div>
+        <div class="playing" id="playChips"></div>
+        <p class="note">この60秒のあいだは、耳鳴りが音で隠れているだけかもしれません。<br />だから、まだ判定しません。</p>
+      </div>
+      <div class="btnrow">
+        <button class="ghost" id="pauseBtn">一時停止</button>
+        <button class="ghost" id="quitBtn">やめる</button>
+      </div>
+    </section>
+
+    <!-- ── 画面3：10秒ゲート（ここでも判定させない） ── -->
+    <section class="screen" id="scGate">
+      <div class="bigwrap">
+        <div class="phase">音は止まりました。ここからが本番です</div>
+        <div class="big" id="gateCount">10<small>秒</small></div>
+        <p class="note">10秒だけ待ってください。<br />止めた直後の、いまの耳鳴りを聞きます。</p>
+      </div>
+    </section>
+
+    <!-- ── 画面4：0〜10 ── -->
+    <section class="screen" id="scRate">
+      <div class="card">
+        <h2>いまの耳鳴りは、0から10でいくつ？</h2>
+        <div class="scale" id="scale"></div>
+        <div class="scaleends"><span>0＝聞こえない</span><span>10＝いつもの最大</span></div>
+        <p class="cap" style="margin-top:12px;">さっきより小さくなっていたら、あなたは音が効くタイプかもしれません。<br />変わらなくても、それも大事な結果です。</p>
+      </div>
+    </section>
+
+    <!-- ── 画面5：戻るまでの秒数 ── -->
+    <section class="screen" id="scBack">
+      <div class="bigwrap">
+        <div class="phase">音が止まってから</div>
+        <div class="big" id="backCount">0:00</div>
+        <p class="note">元の大きさに戻ったと感じたら、下のボタンを押してください。<br />戻るのが普通です。どれくらい保つかを、日付といっしょに残していきます。</p>
+      </div>
+      <button class="cta" id="backBtn">元の大きさに戻った</button>
+      <button class="ghost" id="laterBtn">今日はここまでにする（戻り時間なしで記録）</button>
+    </section>
+
+  </main>
+  <!-- ============ /WORK差し込み① ============ -->
+
+  <!-- 記録 -->
+  <section class="log">
+    <h2>これまでの記録</h2>
+    <p class="best" id="savedMsg" hidden></p>
+    <p class="best" id="bestLine" hidden></p>
+    <div id="logList"></div>
+  </section>
+
+  <footer>
+    <p class="med" id="medFlag"></p>
+    <a class="up" id="optin" href="https://bodydiscovery.info/owned-optin" target="_blank" rel="noopener">神経科学をもっと学びたい人へ（無料）</a>
+    <p class="copy">&copy; Functional Neuro Training</p>
+  </footer>
+</div>
+
+<!-- ===== サイドメニュー ===== -->
+<div id="scrim"></div>
+<aside id="menu" aria-hidden="true">
+  <div class="mhead">
+    <span class="t">みみトーン</span>
+    <button class="close" id="menuClose">閉じる ✕</button>
+  </div>
+
+  <h3>なぜ「同じ高さの音」を聞かせるの？</h3>
+  <p class="neuro" id="neuroPanel"></p>
+
+  <div class="mitem">
+    <span>音声ガイド<span class="d">手順を声で案内します（音が鳴っているあいだは黙ります）</span></span>
+    <button class="toggle" id="voiceToggle" aria-pressed="true" aria-label="音声ガイドの切り替え"></button>
+  </div>
+  <div class="mitem">
+    <a class="mlink" id="chLink" href="https://www.youtube.com/channel/UCyZ2zrHx_8p96fJNt_VjjrA" target="_blank" rel="noopener">▶ カラダマニアちゃんねる</a>
+  </div>
+  <div class="mitem">
+    <a class="mlink" id="optin2" href="https://bodydiscovery.info/owned-optin" target="_blank" rel="noopener">▶ 神経科学をもっと学びたい人へ（無料）</a>
+  </div>
+  <div class="mitem">
+    <span>記録を全部消す<span class="d">この端末に残した記録だけを削除します</span></span>
+    <button class="mini" id="clearLog">消す</button>
+  </div>
+  <div class="mitem" style="border-bottom:1px solid var(--line);">
+    <span class="d" id="verLine"></span>
+  </div>
+  <p class="copy" style="margin-top:auto;">&copy; Functional Neuro Training</p>
+</aside>
+
+<!-- ===== インストール案内 ===== -->
+<div class="install" id="install" role="dialog" aria-label="ホーム画面に追加" hidden>
+  <div class="msg" id="installMsg"></div>
+  <button class="x" id="installX" aria-label="閉じる">×</button>
+</div>
+
+<script>
+/* ============ 【WORK差し込み②】CONFIG（文言・色・リンク） ============ */
+var CONFIG = {
+  title: "みみトーン",
+  sub: "耳鳴りと同じ高さの音を、同じ側の耳から60秒。\n止めた直後に何が起きるかを、自分の手元に残す道具です。",
+  version: "v1.0.0",
+  cacheName: "mimi-v1.0.0",
+  accent: null,
+  optinUrl: "https://bodydiscovery.info/owned-optin",
+  channelUrl: "https://www.youtube.com/channel/UCyZ2zrHx_8p96fJNt_VjjrA",
+
+  /* 正直枠（トップに常設・一字一句このまま） */
+  honest:
+"これは治療ではありません。\n" +
+"音を聞かせたあとに小さくなるのは、多くの場合その場かぎりです。\n" +
+"戻ってきても失敗ではありません。\n" +
+"そして「大きい音のほうが効く」は間違いです。過剰に音を入れると\n" +
+"かえって悪くなったという研究があるので、音量の上限は最初から\n" +
+"超えられないようにしてあります。",
+
+  /* 医療フラグ（起動時に1度＋フッター常設・一字一句このまま） */
+  medFlag:
+"次のどれかがある人は、まず耳鼻咽喉科で聴力検査を受けてください。\n" +
+"・ドクドクと脈打つ耳鳴り　・片方の耳だけ　・左右で聞こえ方が違う\n" +
+"・急に聞こえにくくなった（これは急ぎます）　・ぐるぐる回るめまいを繰り返す\n" +
+"・手足のしびれなど神経の症状　・気分がひどく落ち込む\n" +
+"※イヤホンでの使用が前提です。音量は必ず小さく。",
+
+  /* 神経科学パネル（サイドメニュー内・一字一句このまま） */
+  neuro:
+"耳から脳へ音を届ける神経は、入ってくる音が減ると、逆に自分から\n" +
+"勝手に信号を出しはじめることがあります。使われなくなったぶんを\n" +
+"埋めようとして、感度を上げすぎてしまうイメージです。\n" +
+"その\"勝手に鳴っている信号\"を、僕たちは耳鳴りとして聞いています。\n" +
+"\n" +
+"なら、鳴っているのと同じ高さの音を、同じ側から入れてあげたら\n" +
+"どうなるか。研究では、音を聞かせたあとに耳鳴りが一時的に小さくなる、\n" +
+"あるいは消える人がいることが分かっています。17の研究・のべ1,066人を\n" +
+"まとめた報告では、完全に消えた人が34.5%。しかも「耳鳴りと同じ高さに\n" +
+"合わせた音」でその割合がいちばん高かったと書かれています。\n" +
+"\n" +
+"ただし、これは「一時的に」です。戻ってくるのが普通です。\n" +
+"消し続ける方法ではなく、「自分の耳鳴りが音で動くかどうか」を\n" +
+"確かめる道具だと思ってください。",
+
+  /* 音声ガイド脚本（P2設計・そのまま読み上げ） */
+  voice: {
+    ear:    "まず、耳鳴りが聞こえている側を選んでください。両耳の人は両耳で構いません。",
+    pitch:  "スライダーをゆっくり動かして、あなたの耳鳴りと同じ高さのところで止めてください。ぴったりじゃなくて大丈夫です。近ければ十分です。",
+    volume: "耳鳴りがぎりぎり聞こえるくらいの小ささにしてください。大きくすればいいというものではありません。大きすぎる音は、かえって悪くなったという研究があります。",
+    start:  "では60秒。何もしなくていいです。ただ聞いていてください。",
+    stop:   "はい、止まりました。ここからが本番です。10秒待ってください。",
+    rate:   "今の耳鳴りは、0から10でいくつですか。さっきより小さくなっていたら、あなたは音が効くタイプかもしれません。",
+    back:   "元の大きさに戻ったと感じたら、下のボタンを押してください。戻るのが普通です。どれくらい保つかを、日付といっしょに残していきます。"
+  },
+
+  /* 音の設計値（上限はここで機械的に決め打ち。UIから超えられない） */
+  audio: {
+    fMin: 250, fMax: 12000,
+    maxGainTone: 0.05,     /* 純音の出力上限（線形ゲイン） */
+    maxGainNoise: 0.14,    /* 狭帯域ノイズはバンドパスで痩せるぶんだけ上限を別に持つ */
+    noiseQ: 8,
+    fadeSec: 0.12
+  },
+  sessionMs: 60000,   /* 60秒 */
+  gateMs: 10000       /* 止めてから10秒は判定させない */
+};
+/* ============ /WORK差し込み② ============ */
+</script>
+
+<script>
+/* ===== 共通ブート（テンプレ由来：文言差し込み／サイドメニュー／インストール案内／SW） ===== */
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  window.$m = $;
+
+  if(CONFIG.accent){ document.documentElement.style.setProperty('--accent', CONFIG.accent); }
+  document.title = CONFIG.title + " ─ カラダマニア Lite";
+  $('appName').textContent = CONFIG.title;
+  $('appSub').textContent  = CONFIG.sub;
+  $('honestBox').textContent = CONFIG.honest;
+  $('medFlag').textContent   = CONFIG.medFlag;
+  $('gateMedTxt').textContent= CONFIG.medFlag;
+  $('neuroPanel').textContent= CONFIG.neuro;
+  $('optin').href = CONFIG.optinUrl;
+  $('optin2').href = CONFIG.optinUrl;
+  $('chLink').href = CONFIG.channelUrl;
+  $('verLine').textContent = "みみトーン " + CONFIG.version + "／" + CONFIG.cacheName;
+
+  /* --- サイドメニュー（ドロワー：モーダルにしない） --- */
+  var menu = $('menu'), scrim = $('scrim'), mBtn = $('menuBtn');
+  function openMenu(){ menu.classList.add('on'); scrim.classList.add('on'); menu.setAttribute('aria-hidden','false'); mBtn.setAttribute('aria-expanded','true'); }
+  function closeMenu(){ menu.classList.remove('on'); scrim.classList.remove('on'); menu.setAttribute('aria-hidden','true'); mBtn.setAttribute('aria-expanded','false'); }
+  mBtn.addEventListener('click', function(){ menu.classList.contains('on') ? closeMenu() : openMenu(); });
+  $('menuClose').addEventListener('click', closeMenu);
+  scrim.addEventListener('click', closeMenu);
+  window.closeMenu = closeMenu;
+
+  /* --- ホーム画面に追加（standalone時は出さない） --- */
+  var inst = $('install');
+  var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  if(!standalone){
+    $('installMsg').innerHTML = /iPhone|iPad|iPod/.test(navigator.userAgent || '')
+      ? 'iPhone / iPadの方は <b>共有</b> ボタン → <b>「ホーム画面に追加」</b>。アプリとして全画面で使えます。'
+      : '<b>ホーム画面に追加</b> すると、アプリのように使えます（メニュー →「ホーム画面に追加」）。';
+    inst.hidden = false;
+    window.__instAvail = true;
+    document.body.classList.add('hasinstall');
+    $('installX').addEventListener('click', function(){
+      inst.hidden = true; window.__instAvail = false;
+      document.body.classList.remove('hasinstall');
+    });
+  }
+})();
+</script>
+
+<script>
+/* ============ 【WORK差し込み③】最小1機能のロジック ============ */
+/* 左右独立トーンジェネレーター ＋ ピッチマッチング ＋「止めた直後」判定       */
+(function(){
+  var $ = window.$m;
+
+  /* ---------- 保存（本番＝localStorage／使えない端末は在メモリで動かす） ---------- */
+  var Store = (function(){
+    var mem = {}, ok = false;
+    try{ localStorage.setItem('mimi.__t','1'); localStorage.removeItem('mimi.__t'); ok = true; }catch(e){ ok = false; }
+    return {
+      get: function(k){ try{ return ok ? localStorage.getItem(k) : (mem[k] || null); }catch(e){ return mem[k] || null; } },
+      set: function(k,v){ try{ if(ok){ localStorage.setItem(k,v); } else { mem[k]=v; } }catch(e){ mem[k]=v; } },
+      del: function(k){ try{ if(ok){ localStorage.removeItem(k); } else { delete mem[k]; } }catch(e){ delete mem[k]; } }
+    };
+  })();
+
+  var K_LOG = 'mimi.v1.log', K_ACK = 'mimi.v1.ackMed';
+
+  /* ---------- 状態は window に載せる（iOS Safariが裏でJSの状態を捨てる対策） ---------- */
+  window.appMode  = 'boot';           /* boot | setup | play | gate | rate | back */
+  window.mimiState = {
+    ear: 'B',                          /* R | L | B */
+    type: 'tone',                      /* tone | noise */
+    freq: { R: 0, L: 0 },              /* Hz（左右べつべつ） */
+    vol:  { R: 25, L: 25 },            /* 0〜100（左右べつべつ） */
+    stopAt: 0, rating: null, paused: false, audioOK: null, voiceOn: true,
+    log: []
+  };
+  var S = window.mimiState;
+
+  try{ S.log = JSON.parse(Store.get(K_LOG) || '[]') || []; }catch(e){ S.log = []; }
+
+  /* ---------- 周波数マッピング（対数目盛：250Hz〜12kHz） ---------- */
+  var A = CONFIG.audio;
+  var RATIO = A.fMax / A.fMin;
+  function sliderToFreq(v){ return A.fMin * Math.pow(RATIO, v / 1000); }
+  function roundFreq(f){
+    if(f < 1000) return Math.round(f / 5) * 5;
+    if(f < 4000) return Math.round(f / 10) * 10;
+    return Math.round(f / 25) * 25;
+  }
+  function fmtFreq(f){ return f >= 1000 ? (f/1000).toFixed(f >= 10000 ? 1 : 2) + ' kHz' : Math.round(f) + ' Hz'; }
+
+  /* ---------- 音量→ゲイン（★上限を機械的にクリップ：UIからは絶対に超えられない） ---------- */
+  function gainFor(pct, type){
+    var cap = (type === 'noise') ? A.maxGainNoise : A.maxGainTone;
+    var lin = Math.pow(Math.max(0, Math.min(100, pct)) / 100, 2.2) * cap;
+    return Math.min(lin, cap);        /* ← ここが機械的なクリップ */
+  }
+
+  /* ---------- 音のエンジン（左右で別々の周波数を同時に出す） ---------- */
+  var Engine = (function(){
+    var ctx = null, master = null, merger = null, noiseBuf = null;
+    var chain = { L: null, R: null };
+
+    function makeNoise(){
+      var len = Math.floor(ctx.sampleRate * 2);
+      var b = ctx.createBuffer(1, len, ctx.sampleRate);
+      var d = b.getChannelData(0);
+      for(var i=0;i<len;i++){ d[i] = Math.random() * 2 - 1; }
+      return b;
+    }
+
+    function init(){
+      if(ctx) return true;
+      if(S.audioOK === false) return false;
+      try{
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if(!AC) throw new Error('AudioContext なし');
+        ctx = new AC();
+        master = ctx.createGain(); master.gain.value = 1;
+        merger = ctx.createChannelMerger(2);   /* 0=左ch / 1=右ch */
+        merger.connect(master);
+        master.connect(ctx.destination);
+        noiseBuf = makeNoise();
+        S.audioOK = true;
+        return true;
+      }catch(e){
+        ctx = null; S.audioOK = false;
+        return false;
+      }
+    }
+
+    function resume(cb){
+      if(!ctx){ if(cb) cb(false); return; }
+      if(ctx.state === 'running'){ if(cb) cb(true); return; }
+      try{
+        var p = ctx.resume();
+        if(p && p.then){ p.then(function(){ if(cb) cb(ctx.state === 'running'); })
+                          .catch(function(){ if(cb) cb(false); }); }
+        else { if(cb) cb(ctx.state === 'running'); }
+      }catch(e){ if(cb) cb(false); }
+    }
+
+    /* side='L'|'R' … 左右それぞれ独立のノードを作り、ChannelMergerNodeの別チャンネルへ挿す */
+    function start(side, freq, type, pct){
+      if(!init()) return;
+      stop(side, true);
+      var idx = (side === 'L') ? 0 : 1;
+      var g = ctx.createGain();
+      g.gain.value = 0.0001;
+      g.connect(merger, 0, idx);              /* ★ここで左右が完全に分かれる */
+      var src, filt = null;
+      if(type === 'noise'){
+        src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+        filt = ctx.createBiquadFilter(); filt.type = 'bandpass';
+        filt.frequency.value = freq; filt.Q.value = A.noiseQ;
+        src.connect(filt); filt.connect(g);
+      }else{
+        src = ctx.createOscillator(); src.type = 'sine';
+        src.frequency.value = freq;
+        src.connect(g);
+      }
+      try{ src.start(); }catch(e){}
+      var t = ctx.currentTime;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gainFor(pct, type)), t + A.fadeSec);
+      chain[side] = { src: src, filt: filt, gain: g, type: type };
+    }
+
+    function stop(side, immediate){
+      var c = chain[side]; if(!c) return;
+      chain[side] = null;
+      try{
+        var t = ctx.currentTime, f = immediate ? 0.02 : A.fadeSec;
+        c.gain.gain.cancelScheduledValues(t);
+        c.gain.gain.setValueAtTime(Math.max(0.0002, c.gain.gain.value), t);
+        c.gain.gain.exponentialRampToValueAtTime(0.0001, t + f);
+        setTimeout(function(){ try{ c.src.stop(); }catch(e){} try{ c.src.disconnect(); c.gain.disconnect(); if(c.filt) c.filt.disconnect(); }catch(e){} }, (f * 1000) + 60);
+      }catch(e){}
+    }
+
+    function stopAll(immediate){ stop('L', immediate); stop('R', immediate); }
+
+    function setFreq(side, freq){
+      var c = chain[side]; if(!c || !ctx) return;
+      var t = ctx.currentTime;
+      if(c.type === 'noise'){ c.filt.frequency.setTargetAtTime(freq, t, 0.02); }
+      else { c.src.frequency.setTargetAtTime(freq, t, 0.02); }
+    }
+    function setVol(side, pct){
+      var c = chain[side]; if(!c || !ctx) return;
+      c.gain.gain.setTargetAtTime(Math.max(0.0002, gainFor(pct, c.type)), ctx.currentTime, 0.04);
+    }
+    function mute(on){
+      if(!ctx || !master) return;
+      master.gain.setTargetAtTime(on ? 0.0001 : 1, ctx.currentTime, 0.05);
+    }
+    function playing(){ return !!(chain.L || chain.R); }
+    function isOn(side){ return !!chain[side]; }
+    function state(){ return ctx ? ctx.state : 'none'; }
+
+    return { init:init, resume:resume, start:start, stop:stop, stopAll:stopAll,
+             setFreq:setFreq, setVol:setVol, mute:mute, playing:playing, isOn:isOn, state:state };
+  })();
+  window.mimiEngine = Engine;
+
+  /* ---------- 音声ガイド（Audio要素は作らない＝iOSで2本目が無音になる事故を回避） ---------- */
+  /* 音が鳴っているあいだは絶対に喋らない（耳鳴りの判定に声が混ざるため）                */
+  var Voice = (function(){
+    var can = ('speechSynthesis' in window) && ('SpeechSynthesisUtterance' in window);
+    function say(text, done){
+      if(!S.voiceOn || !can || Engine.playing()){ if(done) setTimeout(done, 10); return; }
+      try{
+        window.speechSynthesis.cancel();
+        var u = new SpeechSynthesisUtterance(text);
+        u.lang = 'ja-JP'; u.rate = 0.95; u.pitch = 1;
+        var called = false;
+        var fin = function(){ if(called) return; called = true; if(done) done(); };
+        u.onend = fin; u.onerror = fin;
+        window.speechSynthesis.speak(u);
+        if(done) setTimeout(fin, 6000);   /* onendが来ない端末の保険 */
+      }catch(e){ if(done) done(); }
+    }
+    function shutup(){ try{ if(can) window.speechSynthesis.cancel(); }catch(e){} }
+    return { say:say, shutup:shutup, can:can };
+  })();
+
+  /* ---------- 画面切り替え ---------- */
+  var SCREENS = { setup:'scSetup', play:'scPlay', gate:'scGate', rate:'scRate', back:'scBack' };
+  function show(mode){
+    window.appMode = mode;
+    for(var k in SCREENS){
+      var el = $(SCREENS[k]); if(!el) continue;
+      if(k === mode) el.classList.add('on'); else el.classList.remove('on');
+    }
+    /* 60秒中と10秒ゲート中は、判定に関わるものを画面から消す */
+    var logSec = document.querySelector('.log');
+    if(logSec) logSec.style.display = (mode === 'play' || mode === 'gate') ? 'none' : '';
+    /* セッション中はインストール案内を引っ込める（一時停止・やめるが隠れないように） */
+    var inst = document.getElementById('install');
+    if(inst && window.__instAvail){
+      inst.hidden = (mode !== 'setup');
+      document.body.classList.toggle('hasinstall', mode === 'setup');
+    }
+    window.scrollTo(0, 0);
+  }
+
+  /* ---------- タイマー（すべて Date.now() 基準。setIntervalの回数では数えない） ---------- */
+  var T = { startAt:0, pausedAt:0, pausedTotal:0, id:null };
+  function tStart(){ T.startAt = Date.now(); T.pausedAt = 0; T.pausedTotal = 0; }
+  function tElapsed(){
+    if(!T.startAt) return 0;
+    var base = T.pausedAt ? T.pausedAt : Date.now();
+    return base - T.startAt - T.pausedTotal;
+  }
+  function tick(fn){ tStop(); T.id = setInterval(fn, 100); fn(); }
+  function tStop(){ if(T.id){ clearInterval(T.id); T.id = null; } }
+  function mmss(ms){
+    var s = Math.max(0, Math.floor(ms / 1000));
+    return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+  }
+
+  /* ---------- 設定UI ---------- */
+  var els = {
+    fR:$('fR'), fL:$('fL'), vR:$('vR'), vL:$('vL'),
+    fRv:$('fRv'), fLv:$('fLv'), vRv:$('vRv'), vLv:$('vLv'),
+    panR:$('panR'), panL:$('panL'), tryR:$('tryR'), tryL:$('tryL'),
+    capR:$('capR'), capL:$('capL')
+  };
+
+  function activeEars(){ return S.ear === 'B' ? ['R','L'] : [S.ear]; }
+  function isActive(side){ return activeEars().indexOf(side) >= 0; }
+
+  function syncFreq(side){
+    var sl = (side === 'R') ? els.fR : els.fL;
+    S.freq[side] = roundFreq(sliderToFreq(parseInt(sl.value, 10)));
+    var out = (side === 'R') ? els.fRv : els.fLv;
+    out.innerHTML = fmtFreq(S.freq[side]).replace(/ (k?Hz)/, '<small>$1</small>');
+    if(Engine.isOn(side)) Engine.setFreq(side, S.freq[side]);
+  }
+  function syncVol(side){
+    var sl = (side === 'R') ? els.vR : els.vL;
+    S.vol[side] = parseInt(sl.value, 10);
+    ((side === 'R') ? els.vRv : els.vLv).textContent = S.vol[side];
+    var cap = $((side === 'R') ? 'capR' : 'capL');
+    cap.textContent = (S.vol[side] >= 100)
+      ? '※ここが上限です。これ以上は上げられません（過剰な音は逆効果という研究があるため）。'
+      : '※耳鳴りがぎりぎり聞こえるくらいで十分です。';
+    if(Engine.isOn(side)) Engine.setVol(side, S.vol[side]);
+  }
+  function syncPanels(){
+    els.panR.hidden = !isActive('R');
+    els.panL.hidden = !isActive('L');
+    if(!isActive('R')) stopPreview('R');
+    if(!isActive('L')) stopPreview('L');
+  }
+
+  /* 試聴（ピッチ合わせ用。左右それぞれ独立に鳴らせる） */
+  function startPreview(side){
+    if(!ensureAudio()) return;
+    Voice.shutup();
+    Engine.resume(function(ok){
+      if(!ok){ noAudio('ロックダウンモードなどで音がブロックされている可能性があります。'); return; }
+      Engine.start(side, S.freq[side], S.type, S.vol[side]);
+      var btn = $((side === 'R') ? 'tryR' : 'tryL');
+      btn.setAttribute('aria-pressed','true');
+      btn.textContent = (side === 'R') ? '■ 右耳を止める' : '■ 左耳を止める';
+    });
+  }
+  function stopPreview(side){
+    Engine.stop(side);
+    var b = $((side === 'R') ? 'tryR' : 'tryL');
+    b.setAttribute('aria-pressed','false');
+    b.textContent = (side === 'R') ? '▶ 右耳で試聴' : '▶ 左耳で試聴';
+  }
+  function togglePreview(side){
+    if(Engine.isOn(side)) stopPreview(side); else startPreview(side);
+  }
+
+  /* ---------- 音が出せない端末の正直な扱い ---------- */
+  function ensureAudio(){
+    if(S.audioOK === false){ noAudio(); return false; }
+    var ok = Engine.init();
+    if(!ok) noAudio();
+    return ok;
+  }
+  function noAudio(extra){
+    S.audioOK = false;
+    var b = $('lockBanner');
+    b.innerHTML = 'この端末では音を出せませんでした。<br />このアプリは<b>音そのものが中身</b>なので、残念ですが、この端末では使えません。'
+      + (extra ? '<br />' + extra : '')
+      + '<br />iPhoneの方は「ロックダウンモード」がオンになっていないか、設定を確認してください。別の端末で開くのがいちばん早いです。';
+    b.hidden = false;
+    $('startBtn').disabled = true;
+    els.tryR.disabled = true; els.tryL.disabled = true;
+  }
+  function lockdownWarn(){
+    var b = $('lockBanner');
+    if(!b.hidden) return;
+    b.innerHTML = '音の準備ができていません。画面のどこかを一度タップしてから、もう一度お試しください。<br />（iPhoneの「ロックダウンモード」がオンだと音が出せないことがあります）';
+    b.hidden = false;
+  }
+
+  /* ---------- セッション（60秒 → 10秒ゲート → 0〜10 → 戻るまでの秒数） ---------- */
+  var RING_LEN = 553;
+  function chipsHtml(){
+    return activeEars().map(function(s){
+      return '<span class="chip ' + s + '">' + (s === 'R' ? '右' : '左') + '　' + fmtFreq(S.freq[s]) + '　' + (S.type === 'noise' ? '狭帯域ノイズ' : '純音') + '</span>';
+    }).join('');
+  }
+
+  function startSession(){
+    if(!ensureAudio()) return;
+    stopPreview('R'); stopPreview('L');
+    Voice.shutup();
+    S.rating = null; S.stopAt = 0; S.paused = false;
+    show('play');
+    $('playChips').innerHTML = chipsHtml();
+    $('playPhase').textContent = 'まもなく音が出ます';
+    $('playCount').innerHTML = '60<small>秒</small>';
+    $('ring').setAttribute('stroke-dashoffset', '0');
+    $('pauseBtn').textContent = '一時停止';
+    Voice.say(CONFIG.voice.start, beginTone);
+  }
+
+  function beginTone(){
+    Engine.resume(function(ok){
+      if(!ok && Engine.state() !== 'running'){ lockdownWarn(); }
+      activeEars().forEach(function(s){ Engine.start(s, S.freq[s], S.type, S.vol[s]); });
+      $('playPhase').textContent = 'ただ、聞いていてください';
+      tStart();
+      tick(playTick);
+    });
+  }
+
+  function playTick(){
+    if(window.appMode !== 'play'){ tStop(); return; }
+    var left = CONFIG.sessionMs - tElapsed();
+    if(left <= 0){ endTone(); return; }
+    $('playCount').innerHTML = Math.ceil(left / 1000) + '<small>秒</small>';
+    var done = 1 - (left / CONFIG.sessionMs);
+    $('ring').setAttribute('stroke-dashoffset', String(-RING_LEN * done));
+  }
+
+  function endTone(){
+    tStop();
+    Engine.mute(false);
+    Engine.stopAll();
+    S.stopAt = Date.now();              /* ★戻るまでの秒数は「音が止まった時刻」から測る */
+    show('gate');
+    $('gateCount').innerHTML = '10<small>秒</small>';
+    Voice.say(CONFIG.voice.stop);
+    tStart();
+    tick(gateTick);
+  }
+
+  function gateTick(){
+    if(window.appMode !== 'gate'){ tStop(); return; }
+    var left = CONFIG.gateMs - tElapsed();
+    if(left <= 0){ tStop(); goRate(); return; }
+    $('gateCount').innerHTML = Math.ceil(left / 1000) + '<small>秒</small>';
+  }
+
+  function goRate(){
+    show('rate');
+    var buttons = $('scale').querySelectorAll('button');
+    for(var i=0;i<buttons.length;i++){ buttons[i].setAttribute('aria-pressed','false'); }
+    Voice.say(CONFIG.voice.rate);
+  }
+
+  function goBack(){
+    show('back');
+    Voice.say(CONFIG.voice.back);
+    tick(backTick);
+  }
+  function backTick(){
+    if(window.appMode !== 'back'){ tStop(); return; }
+    $('backCount').textContent = mmss(Date.now() - S.stopAt);
+  }
+
+  function saveRecord(returnSec){
+    tStop();
+    var rec = {
+      at: Date.now(),
+      ear: S.ear,
+      type: S.type,
+      freq: { R: isActive('R') ? S.freq.R : null, L: isActive('L') ? S.freq.L : null },
+      vol:  { R: isActive('R') ? S.vol.R  : null, L: isActive('L') ? S.vol.L  : null },
+      rating: S.rating,
+      returnSec: (returnSec === null) ? null : Math.round(returnSec)
+    };
+    S.log.unshift(rec);
+    if(S.log.length > 200) S.log.length = 200;
+    try{ Store.set(K_LOG, JSON.stringify(S.log)); }catch(e){}
+    renderLog();
+    show('setup');
+    $('playPhase').textContent = '';
+    var sm = $('savedMsg');
+    sm.textContent = '記録しました。戻ってきても失敗ではありません。';
+    sm.hidden = false;
+    setTimeout(function(){ sm.hidden = true; }, 6000);
+  }
+
+  function quitSession(){
+    tStop(); Voice.shutup(); Engine.mute(false); Engine.stopAll(true);
+    S.paused = false;
+    show('setup');
+  }
+
+  /* ---------- 記録の表示 ---------- */
+  function fmtDate(ms){
+    var d = new Date(ms);
+    return (d.getMonth()+1) + '/' + d.getDate() + ' ' + ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
+  }
+  function earsHtml(rec){
+    var out = [];
+    if(rec.freq.R !== null) out.push('<span class="r">右 ' + fmtFreq(rec.freq.R) + '</span>');
+    if(rec.freq.L !== null) out.push('<span class="l">左 ' + fmtFreq(rec.freq.L) + '</span>');
+    return out.join('　／　');
+  }
+  function renderLog(){
+    var wrap = $('logList');
+    if(!S.log.length){
+      wrap.innerHTML = '<p class="empty">まだ記録はありません。<br />1回やると、日付・左右・高さ・0〜10・戻るまでの秒数がここに残ります。<br />自分の耳に合う高さが、だんだん見えてきます。</p>';
+      $('bestLine').hidden = true;
+      return;
+    }
+    var html = '';
+    for(var i=0;i<S.log.length;i++){
+      var r = S.log[i];
+      html += '<div class="logitem">'
+        + '<div class="top"><span>' + fmtDate(r.at) + '</span><span>' + (r.type === 'noise' ? '狭帯域ノイズ' : '純音') + '</span></div>'
+        + '<div class="ears">' + earsHtml(r) + '</div>'
+        + '<div class="res">止めた直後：' + (r.rating === null ? '—' : r.rating) + ' ／ 10　'
+        + (r.returnSec === null ? '（戻り時間は未記録）' : '戻るまで ' + mmss(r.returnSec * 1000)) + '</div>'
+        + '</div>';
+    }
+    wrap.innerHTML = html;
+
+    var best = null;
+    for(var j=0;j<S.log.length;j++){
+      var x = S.log[j];
+      if(x.returnSec !== null && (!best || x.returnSec > best.returnSec)) best = x;
+    }
+    var bl = $('bestLine');
+    if(best){
+      bl.textContent = 'いちばん長く保ったのは【' + earsHtml(best).replace(/<[^>]+>/g,'') + '・'
+        + (best.type === 'noise' ? '狭帯域ノイズ' : '純音') + '】で ' + mmss(best.returnSec * 1000) + '。';
+      bl.hidden = false;
+    }else{ bl.hidden = true; }
+  }
+
+  /* ---------- イベント配線 ---------- */
+  $('earSeg').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null; if(!b) return;
+    var all = this.querySelectorAll('button');
+    for(var i=0;i<all.length;i++){ all[i].setAttribute('aria-pressed', String(all[i] === b)); }
+    S.ear = b.getAttribute('data-ear');
+    syncPanels();
+  });
+  $('typeSeg').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button') : null; if(!b) return;
+    var all = this.querySelectorAll('button');
+    for(var i=0;i<all.length;i++){ all[i].setAttribute('aria-pressed', String(all[i] === b)); }
+    S.type = b.getAttribute('data-type');
+    /* 音の種類を変えたら鳴らし直す（左右それぞれ） */
+    ['R','L'].forEach(function(s){ if(Engine.isOn(s)){ Engine.stop(s, true); setTimeout(function(){ Engine.start(s, S.freq[s], S.type, S.vol[s]); }, 90); } });
+    syncVol('R'); syncVol('L');
+  });
+
+  ['R','L'].forEach(function(side){
+    var f = (side === 'R') ? els.fR : els.fL;
+    var v = (side === 'R') ? els.vR : els.vL;
+    f.addEventListener('input', function(){ syncFreq(side); });
+    v.addEventListener('input', function(){ syncVol(side); volHint(); });
+  });
+  var volHinted = false;
+  function volHint(){
+    if(volHinted) return; volHinted = true;
+    if(!Engine.playing()) Voice.say(CONFIG.voice.volume);
+  }
+  var fineBtns = document.querySelectorAll('[data-fine]');
+  for(var i2=0;i2<fineBtns.length;i2++){
+    fineBtns[i2].addEventListener('click', function(){
+      var side = this.getAttribute('data-fine'), dir = parseInt(this.getAttribute('data-dir'), 10);
+      var sl = (side === 'R') ? els.fR : els.fL;
+      sl.value = String(Math.max(0, Math.min(1000, parseInt(sl.value, 10) + dir * 8)));
+      syncFreq(side);
+    });
+  }
+  els.tryR.addEventListener('click', function(){ togglePreview('R'); });
+  els.tryL.addEventListener('click', function(){ togglePreview('L'); });
+  $('startBtn').addEventListener('click', startSession);
+
+  function setPaused(on, why){
+    if(window.appMode !== 'play') return;
+    if(on === S.paused) return;
+    var btn = $('pauseBtn');
+    if(on){
+      S.paused = true; T.pausedAt = Date.now();
+      Engine.mute(true);
+      btn.textContent = '再開する';
+      $('playPhase').textContent = why || '一時停止中（この時間は数えていません）';
+    }else{
+      S.paused = false;
+      T.pausedTotal += (Date.now() - T.pausedAt); T.pausedAt = 0;
+      Engine.mute(false);
+      btn.textContent = '一時停止';
+      $('playPhase').textContent = 'ただ、聞いていてください';
+    }
+  }
+  $('pauseBtn').addEventListener('click', function(){ setPaused(!S.paused); });
+  $('quitBtn').addEventListener('click', quitSession);
+
+  /* 0〜10 */
+  (function(){
+    var html = '';
+    for(var n=0;n<=10;n++){ html += '<button type="button" data-r="' + n + '" aria-pressed="false">' + n + '</button>'; }
+    $('scale').innerHTML = html;
+    $('scale').addEventListener('click', function(e){
+      var b = e.target.closest ? e.target.closest('button') : null; if(!b) return;
+      var all = this.querySelectorAll('button');
+      for(var i=0;i<all.length;i++){ all[i].setAttribute('aria-pressed', String(all[i] === b)); }
+      S.rating = parseInt(b.getAttribute('data-r'), 10);
+      setTimeout(goBack, 260);
+    });
+  })();
+
+  $('backBtn').addEventListener('click', function(){ saveRecord((Date.now() - S.stopAt) / 1000); });
+  $('laterBtn').addEventListener('click', function(){ saveRecord(null); });
+
+  /* 音声ガイドのトグル（確認ダイアログなし） */
+  $('voiceToggle').addEventListener('click', function(){
+    S.voiceOn = !S.voiceOn;
+    this.setAttribute('aria-pressed', String(S.voiceOn));
+    if(!S.voiceOn) Voice.shutup();
+  });
+  $('clearLog').addEventListener('click', function(){
+    S.log = []; Store.del(K_LOG); renderLog();
+    this.textContent = '消しました';
+    var self = this; setTimeout(function(){ self.textContent = '消す'; }, 1500);
+  });
+
+  /* アプリが裏に回ったら鳴らしっぱなしにしない（iOS対策も兼ねる） */
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden){
+      Voice.shutup();
+      /* iOSは裏に回ると音が止まる。時間だけ進むと計測が嘘になるので自動で一時停止する */
+      if(window.appMode === 'play') setPaused(true, '別の画面に移ったので止めました（再開する を押してください）');
+      if(window.appMode === 'setup'){ stopPreview('R'); stopPreview('L'); }
+    }
+  });
+
+  /* ---------- 起動ゲート → 初期化 ---------- */
+  function openApp(){
+    show('setup');
+    syncPanels();
+    Voice.say(CONFIG.voice.ear, function(){ setTimeout(function(){ if(!Engine.playing()) Voice.say(CONFIG.voice.pitch); }, 250); });
+  }
+  window.mimiOpenApp = openApp;
+
+  $('gateMedOk').addEventListener('click', function(){
+    Store.set(K_ACK, '1');
+    $('gateMed').classList.remove('on');
+    $('gateAudio').classList.add('on');
+  });
+  $('gateAudOk').addEventListener('click', function(){
+    /* ここが最初のタップ＝iOSのAudioContext解錠ポイント */
+    var ok = Engine.init();
+    if(!ok){ noAudio(); }
+    else { Engine.resume(function(running){ if(!running) lockdownWarn(); }); }
+    $('gateAudio').classList.remove('on');
+    openApp();
+  });
+
+  /* 初期表示 */
+  syncFreq('R'); syncFreq('L'); syncVol('R'); syncVol('L'); syncPanels(); renderLog();
+  if(!(window.AudioContext || window.webkitAudioContext)) noAudio('この端末のブラウザは音の生成（Web Audio）に対応していません。');
+
+  window.mimiBootGates = function(){
+    if(Store.get(K_ACK) === '1'){ $('gateAudio').classList.add('on'); }
+    else { $('gateMed').classList.add('on'); }
+  };
+})();
+/* ============ /WORK差し込み③ ============ */
+</script>
+
+<script>
+/* ===== スプラッシュ → 起動ゲート ===== */
+(function(){
+  var s = document.getElementById('splash');
+  setTimeout(function(){
+    if(s){ s.classList.add('hide'); setTimeout(function(){ s.style.display = 'none'; }, 550); }
+    if(window.mimiBootGates) window.mimiBootGates();
+  }, 1700);
+})();
+</script>
+
+<script>
+/* ===== Service Worker：登録＋controllerchangeで自動リロード（新しい版を必ず出す） ===== */
+(function(){
+  if(!('serviceWorker' in navigator)) return;
+  /* 初回インストール時のclaimでは再読み込みしない（スプラッシュが2度出るだけで意味がないため）。
+     2回目以降＝新しい版に入れ替わったときは必ず自動リロードして、古いHTMLを残さない。 */
+  var hadController = !!navigator.serviceWorker.controller;
+  var reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function(){
+    if(!hadController){ hadController = true; return; }   /* 初回claimは飲み込む */
+    if(reloaded) return;
+    reloaded = true;
+    window.location.reload();
+  });
+  /* 登録は load を待たない（外部CDNが遅い端末で登録がいつまでも走らない事故を防ぐ） */
+  function register(){
+    navigator.serviceWorker.register('sw.js').then(function(reg){
+      if(reg && reg.update){ setTimeout(function(){ try{ reg.update(); }catch(e){} }, 3000); }
+    }).catch(function(){});
+  }
+  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', register); }
+  else { register(); }
+})();
+</script>
+</body>
+</html>

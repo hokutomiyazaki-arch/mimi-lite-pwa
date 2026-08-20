@@ -39,7 +39,8 @@
     --panel:rgba(255,255,255,.05);
   }
   *{box-sizing:border-box; margin:0; padding:0;}
-  html,body{height:100%; overflow-x:hidden; width:100%;}
+  /* ★height:100% はページ全体のスクロールを殺す（iPadで両耳モードの下半分が触れなくなった原因・v1.0.1で修正） */
+  html,body{min-height:100%; overflow-x:hidden; width:100%;}
   html{-webkit-text-size-adjust:100%;}
   body{
     font-family:"M PLUS Rounded 1c","Hiragino Maru Gothic ProN","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
@@ -460,8 +461,8 @@
 var CONFIG = {
   title: "みみトーン",
   sub: "耳鳴りと同じ高さの音を、同じ側の耳から60秒。\n止めた直後に何が起きるかを、自分の手元に残す道具です。",
-  version: "v1.0.0",
-  cacheName: "mimi-v1.0.0",
+  version: "v1.0.1",
+  cacheName: "mimi-v1.0.1",
   accent: null,
   optinUrl: "https://bodydiscovery.info/owned-optin",
   channelUrl: "https://www.youtube.com/channel/UCyZ2zrHx_8p96fJNt_VjjrA",

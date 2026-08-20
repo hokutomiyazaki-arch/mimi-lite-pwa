@@ -4,7 +4,7 @@
    ※Cache-Firstにしない（古いHTMLが residual に残って出荷事故になった前例あり）
    ※デプロイのたびに CACHE_NAME を上げる
    ============================================================ */
-const CACHE_NAME = 'mimi-v1.0.0';
+const CACHE_NAME = 'mimi-v1.0.1';
 
 const APP_SHELL = [
   './',
